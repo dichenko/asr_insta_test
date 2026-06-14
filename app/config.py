@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     app_base_url: str = "https://api.instagram-ai.liven8n.site"
     port: int = 8000
     log_level: str = "INFO"
+    app_secret_key: str = ""
 
     database_url: str = "postgresql+asyncpg://instagram_ai:password@postgres:5432/instagram_ai"
 

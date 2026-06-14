@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_session
 from app.models import AuthSession
 from app.services.crypto import hash_state
+from app.services.oauth_cookie import OAUTH_SESSION_COOKIE, sign_auth_session_cookie
 
 router = APIRouter()
 
@@ -50,8 +51,17 @@ async def connect_page(state: str = Query(...), session: AsyncSession = Depends(
     if auth_session is None:
         return _html("Link expired", "<p>This connection link has expired. Please return to Telegram and request a new link.</p>")
 
-    return _html(
+    response = _html(
         "Connect Instagram",
-        f"""<p>Нажмите кнопку ниже, чтобы подключить Instagram Professional аккаунт.</p>
-<a class="button" href="/auth/instagram/start?state={state}">Connect with Instagram</a>""",
+        """<p>Нажмите кнопку ниже, чтобы подключить Instagram Professional аккаунт.</p>
+<a class="button" href="/auth/instagram/start">Connect with Instagram</a>""",
     )
+    response.set_cookie(
+        key=OAUTH_SESSION_COOKIE,
+        value=sign_auth_session_cookie(auth_session.id, auth_session.expires_at),
+        max_age=1800,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+    )
+    return response
