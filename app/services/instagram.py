@@ -9,6 +9,13 @@ from app.config import Settings, get_settings
 logger = logging.getLogger(__name__)
 
 
+def _safe_response_body(response: httpx.Response) -> Any:
+    try:
+        return response.json()
+    except ValueError:
+        return response.text[:1000]
+
+
 class InstagramClient:
     def __init__(self, access_token: str | None = None, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
@@ -23,9 +30,18 @@ class InstagramClient:
             "redirect_uri": self.settings.instagram_redirect_uri,
             "code": code,
         }
+        multipart_payload = {key: (None, value) for key, value in payload.items()}
         async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post("https://api.instagram.com/oauth/access_token", data=payload)
-            response.raise_for_status()
+            response = await client.post("https://api.instagram.com/oauth/access_token", files=multipart_payload)
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError:
+                logger.warning(
+                    "Instagram short-lived token exchange failed: status=%s body=%s",
+                    response.status_code,
+                    _safe_response_body(response),
+                )
+                raise
             return response.json()
 
     async def exchange_for_long_lived_token(self, short_lived_token: str) -> dict[str, Any] | None:
