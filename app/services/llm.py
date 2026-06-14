@@ -42,17 +42,13 @@ async def generate_instagram_report(data: dict[str, Any], settings: Settings | N
             {
                 "role": "user",
                 "content": (
-                    "Analyze this Instagram account data and prepare a concise report in Russian.\n\n"
-                    "Required structure:\n"
-                    "1. Executive summary\n"
-                    "2. What is working well\n"
-                    "3. What is weak or risky\n"
-                    "4. Best-performing content patterns\n"
-                    "5. Audience and engagement observations\n"
-                    "6. Concrete recommendations for the next 14 days\n"
-                    "7. 10 content ideas based on the data\n"
-                    "8. Data limitations\n\n"
-                    "Use clear language. Avoid generic advice. If the dataset is small or incomplete, mention that.\n"
+                    "Подготовь очень краткое тестовое summary на русском языке.\n\n"
+                    "Верни только 4 пункта:\n"
+                    "1. Название аккаунта: username или id, если username отсутствует.\n"
+                    "2. Количество постов: сколько recent_media передано в данных.\n"
+                    "3. Частота публикаций: оцени по timestamp последних постов, если timestamp есть; если данных мало, напиши что оценка ограничена.\n"
+                    "4. Самый популярный пост: выбери пост с максимальным like_count + comments_count, укажи ссылку permalink. Если permalink нет, укажи id поста.\n\n"
+                    "Не добавляй общие рекомендации. Не выдумывай числа и ссылки. Если данных нет, явно напиши что поле недоступно.\n"
                     f"Here is the data:\n{payload}"
                 ),
             },
