@@ -1,8 +1,9 @@
+import logging
 import urllib.parse
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +18,7 @@ from app.services.jobs import run_instagram_analysis_job
 from app.services.telegram import TelegramClient
 
 router = APIRouter(prefix="/auth/instagram")
+logger = logging.getLogger(__name__)
 
 
 @router.get("/start", response_model=None)
@@ -35,12 +37,20 @@ async def start_instagram_oauth(state: str = Query(...), session: AsyncSession =
         "state": state,
     }
     oauth_url = "https://www.instagram.com/oauth/authorize?" + urllib.parse.urlencode(params)
+    logger.info(
+        "Instagram OAuth start: client_id=%s redirect_uri=%r scopes=%s state_len=%s",
+        settings.instagram_client_id,
+        settings.instagram_redirect_uri,
+        settings.scope_list,
+        len(state),
+    )
     return RedirectResponse(oauth_url, status_code=302)
 
 
 @router.get("/callback", response_class=HTMLResponse)
 async def instagram_callback(
     background_tasks: BackgroundTasks,
+    request: Request,
     code: str | None = Query(default=None),
     state: str | None = Query(default=None),
     error: str | None = Query(default=None),
@@ -51,6 +61,19 @@ async def instagram_callback(
         return _html("Instagram error", f"<p>Instagram authorization failed: {error_description or error}</p>")
     if not code or not state:
         return _html("Invalid callback", "<p>Authorization code or state is missing.</p>")
+
+    settings = get_settings()
+    logger.info(
+        "Instagram OAuth callback: host=%r x_forwarded_proto=%r x_forwarded_host=%r path=%r query_keys=%s configured_redirect_uri=%r code_len=%s state_len=%s",
+        request.headers.get("host"),
+        request.headers.get("x-forwarded-proto"),
+        request.headers.get("x-forwarded-host"),
+        request.url.path,
+        sorted(request.query_params.keys()),
+        settings.instagram_redirect_uri,
+        len(code),
+        len(state),
+    )
 
     result = await session.execute(select(AuthSession).where(AuthSession.state_hash == hash_state(state)))
     auth_session = result.scalar_one_or_none()
@@ -63,7 +86,6 @@ async def instagram_callback(
     auth_session.used_at = datetime.now(timezone.utc)
     await session.flush()
 
-    settings = get_settings()
     instagram = InstagramClient(settings=settings)
     try:
         short_token_data = await instagram.exchange_code_for_short_lived_token(code)

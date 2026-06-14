@@ -30,6 +30,7 @@ class InstagramClient:
             "redirect_uri": self.settings.instagram_redirect_uri,
             "code": code,
         }
+        logger.info("Instagram short-lived token exchange: client_id=%s redirect_uri=%r code_len=%s", self.settings.instagram_client_id, self.settings.instagram_redirect_uri, len(code))
         multipart_payload = {key: (None, value) for key, value in payload.items()}
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post("https://api.instagram.com/oauth/access_token", files=multipart_payload)
