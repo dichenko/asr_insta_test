@@ -1,5 +1,4 @@
 import logging
-import urllib.parse
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -14,6 +13,7 @@ from app.models import AnalysisJob, AuthSession, InstagramAccount
 from app.routes.connect import _html, get_valid_auth_session
 from app.services.crypto import encrypt_token, hash_state
 from app.services.instagram import InstagramClient
+from app.services.instagram_oauth import build_instagram_oauth_url
 from app.services.jobs import run_instagram_analysis_job
 from app.services.telegram import TelegramClient
 
@@ -28,15 +28,7 @@ async def start_instagram_oauth(state: str = Query(...), session: AsyncSession =
         return _html("Link expired", "<p>This connection link has expired. Please return to Telegram and request a new link.</p>")
 
     settings = get_settings()
-    params = {
-        "force_reauth": "true",
-        "client_id": settings.instagram_client_id,
-        "redirect_uri": settings.instagram_redirect_uri,
-        "response_type": "code",
-        "scope": ",".join(settings.scope_list),
-        "state": state,
-    }
-    oauth_url = "https://api.instagram.com/oauth/authorize?" + urllib.parse.urlencode(params)
+    oauth_url = build_instagram_oauth_url(state, settings=settings)
     logger.info(
         "Instagram OAuth start: client_id=%s redirect_uri=%r scopes=%s state_len=%s",
         settings.instagram_client_id,
