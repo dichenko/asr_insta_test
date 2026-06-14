@@ -8,7 +8,7 @@ FastAPI MVP for connecting a Telegram user to an Instagram Professional account,
 - `TELEGRAM_WEBHOOK_SECRET` is not used.
 - `TELEGRAM_BOT_USERNAME` is optional and only affects the success-page link back to Telegram.
 - `TOKEN_ENCRYPTION_KEY` is required. It is a Fernet symmetric key used to encrypt Instagram access tokens before saving them in PostgreSQL.
-- Instagram OAuth does not receive the internal `state` value. The app uses the Telegram `/connect?state=...` link only to create a signed HttpOnly browser cookie that maps the Instagram callback back to the Telegram user.
+- Instagram OAuth uses the standard `state` parameter. The app stores only `state_hash` and uses the returned `state` to map the callback back to the Telegram user.
 
 ## Environment
 
@@ -24,18 +24,11 @@ Generate `TOKEN_ENCRYPTION_KEY`:
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-Generate `APP_SECRET_KEY` for signing short-lived OAuth session cookies:
-
-```bash
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-```
-
 Required values:
 
 - `TELEGRAM_BOT_TOKEN`
 - `INSTAGRAM_CLIENT_SECRET`
 - `OPENAI_API_KEY`
-- `APP_SECRET_KEY`
 - `TOKEN_ENCRYPTION_KEY`
 
 The default app URL is:
