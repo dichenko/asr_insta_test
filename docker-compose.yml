@@ -9,7 +9,7 @@ services:
     depends_on:
       - postgres
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:8091:8000"
 
   postgres:
     image: postgres:16-alpine
