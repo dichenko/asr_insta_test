@@ -35,10 +35,10 @@ async def start_instagram_oauth(state: str = Query(...), session: AsyncSession =
         "scope": ",".join(settings.scope_list),
         "state": state,
     }
-    oauth_url = "https://www.instagram.com/oauth/authorize?" + urllib.parse.urlencode(params)
+    oauth_url = "https://api.instagram.com/oauth/authorize?" + urllib.parse.urlencode(params)
     logger.info(
         "Instagram OAuth start: oauth_host=%s client_id=%s redirect_uri=%r scopes=%s state_len=%s",
-        "www.instagram.com",
+        "api.instagram.com",
         settings.instagram_client_id,
         settings.instagram_redirect_uri,
         settings.scope_list,

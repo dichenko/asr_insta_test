@@ -57,9 +57,9 @@ async def connect_page(state: str = Query(...), session: AsyncSession = Depends(
     return _html(
         "Подключение Instagram",
         f"""
-<p>Сейчас откроется официальный экран Instagram/Meta.</p>
+<p>Сейчас откроется официальный экран Instagram.</p>
 <p>Если Instagram попросит логин и пароль, это нормально: вход происходит на официальной странице Instagram, наш сервис не получает ваш пароль.</p>
-<p>Если вы открыли ссылку из Telegram и видите ошибку, нажмите меню браузера и выберите "Открыть в Chrome" или "Открыть в Safari".</p>
+<p>Если ссылка открылась внутри приложения Instagram или показывает странный экран, вернитесь назад и откройте эту страницу в Chrome или Safari.</p>
 <a class="button" href="{start_url}">Продолжить через Instagram</a>
 """,
     )
