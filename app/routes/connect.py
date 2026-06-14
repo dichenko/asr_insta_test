@@ -23,7 +23,7 @@ def _html(title: str, body: str) -> HTMLResponse:
   <title>{title}</title>
   <style>
     body {{ font-family: Arial, sans-serif; max-width: 680px; margin: 56px auto; padding: 0 20px; line-height: 1.5; }}
-    .button {{ display: inline-block; margin-top: 16px; padding: 12px 18px; background: #111; color: white; text-decoration: none; border-radius: 6px; }}
+    .button {{ display: inline-block; margin-top: 16px; padding: 12px 18px; background: #111; color: white; border: 0; border-radius: 6px; cursor: pointer; font: inherit; }}
   </style>
 </head>
 <body><h1>{title}</h1>{body}</body>
@@ -57,11 +57,26 @@ async def connect_page(state: str = Query(...), session: AsyncSession = Depends(
     return _html(
         "Подключение Instagram",
         f"""
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+
 <p>Сейчас откроется официальный экран Instagram.</p>
 <p>Если Instagram попросит логин и пароль, это нормально: вход происходит на официальной странице Instagram, наш сервис не получает ваш пароль.</p>
 <p>Если ссылка открылась внутри приложения Instagram или показывает странный экран, вернитесь назад и откройте эту страницу в Chrome или Safari.</p>
-<a class="button" href="{start_url}" target="_blank" rel="noopener noreferrer">
+
+<button class="button" type="button" onclick="openInstagramAuth()">
   Продолжить через Instagram
-</a>
+</button>
+
+<script>
+function openInstagramAuth() {{
+  const url = "{start_url}";
+
+  if (window.Telegram && Telegram.WebApp && Telegram.WebApp.openLink) {{
+    Telegram.WebApp.openLink(url);
+  }} else {{
+    window.location.href = url;
+  }}
+}}
+</script>
 """,
     )
