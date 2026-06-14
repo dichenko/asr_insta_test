@@ -60,6 +60,8 @@ async def connect_page(state: str = Query(...), session: AsyncSession = Depends(
 <p>Сейчас откроется официальный экран Instagram.</p>
 <p>Если Instagram попросит логин и пароль, это нормально: вход происходит на официальной странице Instagram, наш сервис не получает ваш пароль.</p>
 <p>Если ссылка открылась внутри приложения Instagram или показывает странный экран, вернитесь назад и откройте эту страницу в Chrome или Safari.</p>
-<a class="button" href="{start_url}">Продолжить через Instagram</a>
+<a class="button" href="{start_url}" target="_blank" rel="noopener noreferrer">
+  Продолжить через Instagram
+</a>
 """,
     )
