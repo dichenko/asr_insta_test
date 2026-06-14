@@ -5,6 +5,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.db import get_session
 from app.models import AuthSession
 from app.services.crypto import hash_state
@@ -50,8 +51,15 @@ async def connect_page(state: str = Query(...), session: AsyncSession = Depends(
     if auth_session is None:
         return _html("Link expired", "<p>This connection link has expired. Please return to Telegram and request a new link.</p>")
 
+    settings = get_settings()
+    start_url = f"{settings.connect_url_base}/auth/instagram/start?state={state}"
+
     return _html(
-        "Connect Instagram",
-        f"""<p>Нажмите кнопку ниже, чтобы подключить Instagram Professional аккаунт.</p>
-<a class="button" href="/auth/instagram/start?state={state}">Connect with Instagram</a>""",
+        "Подключение Instagram",
+        f"""
+<p>Сейчас откроется официальный экран Instagram/Meta.</p>
+<p>Если Instagram попросит логин и пароль, это нормально: вход происходит на официальной странице Instagram, наш сервис не получает ваш пароль.</p>
+<p>Если вы открыли ссылку из Telegram и видите ошибку, нажмите меню браузера и выберите "Открыть в Chrome" или "Открыть в Safari".</p>
+<a class="button" href="{start_url}">Продолжить через Instagram</a>
+""",
     )
