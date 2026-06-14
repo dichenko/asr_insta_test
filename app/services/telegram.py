@@ -62,7 +62,7 @@ class TelegramClient:
                 "chat_id": tg_id,
                 "text": text,
                 "reply_markup": {
-                    "inline_keyboard": [[{"text": "Подключить Instagram", "web_app": {"url": url}}]],
+                    "inline_keyboard": [[{"text": "Подключить Instagram", "url": url}]],
                 },
             },
         )
