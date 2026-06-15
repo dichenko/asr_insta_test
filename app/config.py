@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     instagram_scopes: str = "instagram_business_basic,instagram_business_manage_insights"
     instagram_api_version: str = "v23.0"
 
+    facebook_app_id: str = ""
+    facebook_app_secret: str = ""
+    facebook_redirect_uri: str = "https://api.instagram-ai.liven8n.site/auth/facebook/callback"
+    facebook_scopes: str = "public_profile,pages_show_list,pages_read_engagement,instagram_basic,instagram_manage_insights"
+    facebook_api_version: str = "v23.0"
+
     openai_api_key: str = ""
     openai_model: str = "gpt-5.4"
 
@@ -37,6 +43,10 @@ class Settings(BaseSettings):
     @property
     def scope_list(self) -> list[str]:
         return [scope.strip() for scope in self.instagram_scopes.split(",") if scope.strip()]
+
+    @property
+    def facebook_scope_list(self) -> list[str]:
+        return [scope.strip() for scope in self.facebook_scopes.split(",") if scope.strip()]
 
 
 @lru_cache

@@ -122,9 +122,8 @@ async def run_instagram_analysis_job(job_id: uuid.UUID) -> None:
         await telegram.send_message(
             job.tg_id,
             (
-                "Можешь прислать ссылку на аккаунт конкурента или его @username — "
-                "я соберу открытые данные и сделаю краткий анализ.\n\n"
-                "Пример: @example или https://www.instagram.com/example/"
+                "Для анализа конкурентов подключи Facebook через /connect_facebook. "
+                "Нужен доступ к Facebook Page, связанной с Instagram Business/Creator account."
             ),
         )
 

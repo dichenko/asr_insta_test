@@ -30,6 +30,8 @@ def build_competitor_summary(discovery: dict[str, Any]) -> dict[str, Any]:
         top_post = max(compact_posts, key=lambda post: post["interactions"])
 
     return {
+        "account_name": discovery.get("name"),
+        "username": discovery.get("username"),
         "posts_analyzed": posts_analyzed,
         "followers_count": followers_count,
         "follows_count": follows_count,
@@ -77,12 +79,12 @@ def _compact_post(item: dict[str, Any]) -> dict[str, Any]:
 
 def _posting_frequency_text(timestamps: list[datetime], posts_analyzed: int) -> str:
     if len(timestamps) < 2:
-        return "Недостаточно данных для оценки"
+        return "not_enough_data"
     newest = timestamps[0]
     oldest = timestamps[-1]
     days = max((newest - oldest).days, 1)
-    posts_per_week = round(posts_analyzed / days * 7, 1)
-    return f"{posts_analyzed} постов за {days} дня, примерно {posts_per_week} поста в неделю"
+    posts_per_week = round((posts_analyzed - 1) / (days / 7), 1)
+    return f"{posts_analyzed} posts over {days} days, about {posts_per_week} posts per week"
 
 
 def _parse_timestamp(value: Any) -> datetime | None:

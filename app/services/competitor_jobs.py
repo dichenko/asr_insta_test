@@ -5,32 +5,28 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
-from sqlalchemy import select
 
 from app.config import get_settings
 from app.db import AsyncSessionLocal
-from app.models import (
-    CompetitorAccount,
-    CompetitorAnalysisJob,
-    CompetitorAnalysisReport,
-    CompetitorSnapshot,
-    InstagramAccount,
-)
+from app.models import CompetitorAnalysisJob, CompetitorAnalysisReport, CompetitorSnapshot, FacebookConnection, FacebookPage
 from app.services.competitor_metrics import build_competitor_summary
 from app.services.crypto import decrypt_token
-from app.services.instagram import InstagramClient
+from app.services.facebook_graph import FacebookGraphClient
 from app.services.llm import generate_competitor_report
 from app.services.telegram import TelegramClient
 
 logger = logging.getLogger(__name__)
 
+NO_FACEBOOK_PAGE_MESSAGE = (
+    "Для анализа конкурентов нужно подключить Facebook-аккаунт, у которого есть доступ к Facebook Page, "
+    "связанной с Instagram Business/Creator account."
+)
 NO_COMPETITOR_DATA_MESSAGE = (
-    "Не удалось получить данные по этому аккаунту. Возможно, аккаунт приватный, "
-    "не Business/Creator или Instagram не отдал данные через API."
+    "Не удалось получить данные по этому аккаунту. Возможные причины: аккаунт приватный, не Business/Creator, "
+    "username указан неверно или Meta API не отдал данные."
 )
-LLM_FAILED_MESSAGE = (
-    "Данные конкурента получил, но не смог подготовить LLM-резюме. Попробуй позже."
-)
+LLM_FAILED_MESSAGE = "Данные конкурента получил, но не смог подготовить LLM-резюме. Попробуй позже."
+WRONG_FLOW_MESSAGE = "Business Discovery was called through the wrong endpoint or wrong API flow. Expected graph.facebook.com with Facebook Login token."
 
 
 class CompetitorDataUnavailableError(RuntimeError):
@@ -39,11 +35,14 @@ class CompetitorDataUnavailableError(RuntimeError):
 
 def _safe_error(exc: Exception) -> str:
     if isinstance(exc, httpx.HTTPStatusError):
-        return f"HTTPStatusError: status_code={exc.response.status_code} body={_safe_response_body(exc.response)}"[:1000]
+        body = _safe_response_body(exc.response)
+        message = f"HTTPStatusError: status_code={exc.response.status_code} body={body}"[:1000]
+        if "Tried accessing nonexisting field (business_discovery)" in message:
+            return WRONG_FLOW_MESSAGE
+        return message
     if isinstance(exc, httpx.HTTPError):
         return exc.__class__.__name__
-    message = str(exc)
-    message = _redact_text(message)
+    message = _redact_text(str(exc))
     return f"{exc.__class__.__name__}: {message[:500]}"
 
 
@@ -67,6 +66,9 @@ def _redact_value(value: Any) -> Any:
 
 def _redact_text(message: str) -> str:
     message = re.sub(r"access_token=[^&\s]+", "access_token=[redacted]", message)
+    message = re.sub(r"client_secret=[^&\s]+", "client_secret=[redacted]", message)
+    message = re.sub(r"fb_exchange_token=[^&\s]+", "fb_exchange_token=[redacted]", message)
+    message = re.sub(r"code=[^&\s]+", "code=[redacted]", message)
     message = re.sub(r"Bearer\s+[A-Za-z0-9._-]+", "Bearer [redacted]", message)
     message = re.sub(r"sk-[A-Za-z0-9_-]+", "sk-[redacted]", message)
     message = re.sub(r"\b\d{6,}:[A-Za-z0-9_-]{20,}\b", "[telegram-token-redacted]", message)
@@ -91,28 +93,37 @@ async def run_competitor_analysis_job(job_id: uuid.UUID) -> None:
             job = await session.get(CompetitorAnalysisJob, job_id)
             if job is None:
                 raise RuntimeError("Competitor analysis job disappeared")
-            account = await session.get(InstagramAccount, job.viewer_instagram_account_id)
-            if account is None:
-                raise RuntimeError("Viewer Instagram account not found")
+            if job.facebook_connection_id is None or job.facebook_page_id is None or not job.viewer_instagram_business_account_id:
+                await _mark_failed(job_id, "Facebook connection/page is required for Business Discovery")
+                await telegram.send_message(job.tg_id, NO_FACEBOOK_PAGE_MESSAGE)
+                return
+
+            connection = await session.get(FacebookConnection, job.facebook_connection_id)
+            page = await session.get(FacebookPage, job.facebook_page_id)
+            if connection is None or page is None:
+                await _mark_failed(job_id, "Facebook connection or selected Page not found")
+                await telegram.send_message(job.tg_id, NO_FACEBOOK_PAGE_MESSAGE)
+                return
 
             tg_id = job.tg_id
             competitor_username = job.competitor_username
-            viewer_account_id = job.viewer_instagram_account_id
-            viewer_ig_user_id = account.instagram_user_id
-            access_token = decrypt_token(account.access_token_encrypted)
+            viewer_ig_user_id = job.viewer_instagram_business_account_id
+            user_access_token = decrypt_token(connection.user_access_token_encrypted)
+            page_access_token = decrypt_token(page.page_access_token_encrypted) if page.page_access_token_encrypted else None
 
-        instagram = InstagramClient(access_token=access_token, settings=settings)
         api_errors: list[dict[str, Any]] = []
-
         try:
-            response = await instagram.fetch_business_discovery(
+            response = await _fetch_business_discovery_with_fallback(
+                settings=settings,
+                user_access_token=user_access_token,
+                page_access_token=page_access_token,
                 viewer_ig_user_id=viewer_ig_user_id,
                 competitor_username=competitor_username,
-                limit=25,
+                api_errors=api_errors,
             )
             discovery = response.get("business_discovery")
             if not isinstance(discovery, dict) or not discovery:
-                raise CompetitorDataUnavailableError("Instagram API returned no business_discovery data")
+                raise CompetitorDataUnavailableError("Meta API returned no business_discovery data")
         except Exception as exc:
             safe_message = _safe_error(exc)
             logger.warning(
@@ -126,6 +137,8 @@ async def run_competitor_analysis_job(job_id: uuid.UUID) -> None:
             return
 
         summary = build_competitor_summary(discovery)
+        profile = _build_competitor_profile(discovery, competitor_username)
+        media = _extract_media(discovery)
         recent_media_compact = _build_recent_media_compact(discovery)
 
         async with AsyncSessionLocal() as session:
@@ -133,28 +146,26 @@ async def run_competitor_analysis_job(job_id: uuid.UUID) -> None:
             if job is None:
                 raise RuntimeError("Competitor analysis job disappeared before saving result")
 
-            competitor = await _upsert_competitor_account(
-                session=session,
-                tg_id=tg_id,
-                viewer_instagram_account_id=viewer_account_id,
-                username=competitor_username,
-                discovery=discovery,
-            )
-            await session.flush()
-
             snapshot = CompetitorSnapshot(
                 job_id=job.id,
-                competitor_account_id=competitor.id,
+                tg_id=tg_id,
+                competitor_username=competitor_username,
+                competitor_account_id=None,
+                profile_json=profile,
+                media_json=media,
+                summary_metrics_json=summary,
                 raw_json=discovery,
                 summary_json=summary,
                 api_errors_json=api_errors,
             )
-            competitor.last_analysis_at = datetime.now(timezone.utc)
+            connection = await session.get(FacebookConnection, job.facebook_connection_id)
+            if connection:
+                connection.last_used_at = datetime.now(timezone.utc)
             session.add(snapshot)
             await session.commit()
 
         llm_data = {
-            "competitor_profile": _build_competitor_profile(discovery, competitor_username),
+            "competitor_profile": profile,
             "summary_metrics": summary,
             "recent_media_compact": recent_media_compact,
             "api_errors": api_errors,
@@ -172,18 +183,10 @@ async def run_competitor_analysis_job(job_id: uuid.UUID) -> None:
             job = await session.get(CompetitorAnalysisJob, job_id)
             if job is None:
                 raise RuntimeError("Competitor analysis job disappeared before saving report")
-            competitor_result = await session.execute(
-                select(CompetitorAccount).where(
-                    CompetitorAccount.tg_id == tg_id,
-                    CompetitorAccount.viewer_instagram_account_id == viewer_account_id,
-                    CompetitorAccount.username == competitor_username,
-                )
-            )
-            competitor = competitor_result.scalar_one_or_none()
             report = CompetitorAnalysisReport(
                 job_id=job.id,
                 tg_id=tg_id,
-                competitor_account_id=competitor.id if competitor else None,
+                competitor_account_id=None,
                 llm_model=settings.openai_model,
                 report_text=report_text,
             )
@@ -204,39 +207,33 @@ async def run_competitor_analysis_job(job_id: uuid.UUID) -> None:
                 await telegram.send_message(job.tg_id, NO_COMPETITOR_DATA_MESSAGE)
 
 
-async def _upsert_competitor_account(
+async def _fetch_business_discovery_with_fallback(
     *,
-    session,
-    tg_id: int,
-    viewer_instagram_account_id: int,
-    username: str,
-    discovery: dict[str, Any],
-) -> CompetitorAccount:
-    result = await session.execute(
-        select(CompetitorAccount).where(
-            CompetitorAccount.tg_id == tg_id,
-            CompetitorAccount.viewer_instagram_account_id == viewer_instagram_account_id,
-            CompetitorAccount.username == username,
+    settings,
+    user_access_token: str,
+    page_access_token: str | None,
+    viewer_ig_user_id: str,
+    competitor_username: str,
+    api_errors: list[dict[str, Any]],
+) -> dict[str, Any]:
+    user_client = FacebookGraphClient(access_token=user_access_token, settings=settings)
+    try:
+        return await user_client.fetch_business_discovery(
+            viewer_ig_user_id=viewer_ig_user_id,
+            competitor_username=competitor_username,
+            media_limit=25,
         )
-    )
-    competitor = result.scalar_one_or_none()
-    if competitor is None:
-        competitor = CompetitorAccount(
-            tg_id=tg_id,
-            viewer_instagram_account_id=viewer_instagram_account_id,
-            username=username,
-        )
-        session.add(competitor)
+    except httpx.HTTPStatusError as exc:
+        api_errors.append({"scope": "business_discovery_user_token", "error": _safe_error(exc)})
+        if not page_access_token:
+            raise
 
-    competitor.instagram_user_id = _optional_str(discovery.get("id"))
-    competitor.name = _optional_str(discovery.get("name"))
-    competitor.biography = _optional_str(discovery.get("biography"))
-    competitor.website = _optional_str(discovery.get("website"))
-    competitor.profile_picture_url = _optional_str(discovery.get("profile_picture_url"))
-    competitor.followers_count = _optional_int(discovery.get("followers_count"))
-    competitor.follows_count = _optional_int(discovery.get("follows_count"))
-    competitor.media_count = _optional_int(discovery.get("media_count"))
-    return competitor
+    page_client = FacebookGraphClient(access_token=page_access_token, settings=settings)
+    return await page_client.fetch_business_discovery(
+        viewer_ig_user_id=viewer_ig_user_id,
+        competitor_username=competitor_username,
+        media_limit=25,
+    )
 
 
 async def _mark_failed_with_snapshot(
@@ -245,7 +242,7 @@ async def _mark_failed_with_snapshot(
     user_message: str,
     telegram: TelegramClient,
 ) -> None:
-    error_message = api_errors[0]["error"] if api_errors else "Business Discovery failed"
+    error_message = api_errors[-1]["error"] if api_errors else "Business Discovery failed"
     async with AsyncSessionLocal() as session:
         job = await session.get(CompetitorAnalysisJob, job_id)
         if job is None:
@@ -256,7 +253,12 @@ async def _mark_failed_with_snapshot(
         session.add(
             CompetitorSnapshot(
                 job_id=job.id,
+                tg_id=job.tg_id,
+                competitor_username=job.competitor_username,
                 competitor_account_id=None,
+                profile_json=None,
+                media_json=None,
+                summary_metrics_json=None,
                 raw_json=None,
                 summary_json=None,
                 api_errors_json=api_errors,
@@ -288,15 +290,17 @@ def _build_competitor_profile(discovery: dict[str, Any], fallback_username: str)
     }
 
 
-def _build_recent_media_compact(discovery: dict[str, Any]) -> list[dict[str, Any]]:
+def _extract_media(discovery: dict[str, Any]) -> list[dict[str, Any]]:
     media = discovery.get("media") or {}
     items = media.get("data") if isinstance(media, dict) else media
     if not isinstance(items, list):
         return []
+    return [item for item in items if isinstance(item, dict)]
+
+
+def _build_recent_media_compact(discovery: dict[str, Any]) -> list[dict[str, Any]]:
     compact: list[dict[str, Any]] = []
-    for item in items:
-        if not isinstance(item, dict):
-            continue
+    for item in _extract_media(discovery):
         like_count = _optional_int(item.get("like_count")) or 0
         comments_count = _optional_int(item.get("comments_count")) or 0
         caption = item.get("caption")
@@ -315,12 +319,6 @@ def _build_recent_media_compact(discovery: dict[str, Any]) -> list[dict[str, Any
             }
         )
     return compact
-
-
-def _optional_str(value: Any) -> str | None:
-    if value is None:
-        return None
-    return str(value)
 
 
 def _optional_int(value: Any) -> int | None:

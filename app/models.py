@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, Text, UniqueConstraint, func
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -94,6 +94,53 @@ class AnalysisReport(Base):
     instagram_account: Mapped[InstagramAccount | None] = relationship(back_populates="reports")
 
 
+class FacebookAuthSession(Base):
+    __tablename__ = "facebook_auth_sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    provider: Mapped[str] = mapped_column(Text, nullable=False, default="facebook")
+    tg_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("telegram_users.tg_id", ondelete="CASCADE"), nullable=False, index=True)
+    state_hash: Mapped[str] = mapped_column(Text, unique=True, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class FacebookConnection(Base):
+    __tablename__ = "facebook_connections"
+    __table_args__ = (UniqueConstraint("tg_id", "facebook_user_id", name="uq_facebook_connection_tg_user"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tg_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("telegram_users.tg_id", ondelete="CASCADE"), nullable=False, index=True)
+    facebook_user_id: Mapped[str | None] = mapped_column(Text)
+    facebook_name: Mapped[str | None] = mapped_column(Text)
+    user_access_token_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    scopes: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
+    connected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class FacebookPage(Base):
+    __tablename__ = "facebook_pages"
+    __table_args__ = (UniqueConstraint("tg_id", "page_id", name="uq_facebook_page_tg_page"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tg_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("telegram_users.tg_id", ondelete="CASCADE"), nullable=False, index=True)
+    facebook_connection_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("facebook_connections.id", ondelete="CASCADE"), nullable=False, index=True)
+    page_id: Mapped[str] = mapped_column(Text, nullable=False)
+    page_name: Mapped[str | None] = mapped_column(Text)
+    page_access_token_encrypted: Mapped[str | None] = mapped_column(Text)
+    instagram_business_account_id: Mapped[str | None] = mapped_column(Text)
+    instagram_username: Mapped[str | None] = mapped_column(Text)
+    is_selected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    raw_json: Mapped[dict | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class CompetitorAccount(Base):
     __tablename__ = "competitor_accounts"
     __table_args__ = (
@@ -122,7 +169,10 @@ class CompetitorAnalysisJob(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tg_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("telegram_users.tg_id", ondelete="CASCADE"), nullable=False, index=True)
-    viewer_instagram_account_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("instagram_accounts.id", ondelete="CASCADE"), nullable=False, index=True)
+    viewer_instagram_account_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("instagram_accounts.id", ondelete="CASCADE"), index=True)
+    facebook_connection_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("facebook_connections.id", ondelete="SET NULL"), index=True)
+    facebook_page_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("facebook_pages.id", ondelete="SET NULL"), index=True)
+    viewer_instagram_business_account_id: Mapped[str | None] = mapped_column(Text)
     competitor_username: Mapped[str] = mapped_column(Text, nullable=False, index=True)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
     error_message: Mapped[str | None] = mapped_column(Text)
@@ -136,7 +186,12 @@ class CompetitorSnapshot(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("competitor_analysis_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+    tg_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("telegram_users.tg_id", ondelete="CASCADE"), index=True)
+    competitor_username: Mapped[str | None] = mapped_column(Text)
     competitor_account_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("competitor_accounts.id", ondelete="SET NULL"))
+    profile_json: Mapped[dict | None] = mapped_column(JSONB)
+    media_json: Mapped[list[dict] | None] = mapped_column(JSONB)
+    summary_metrics_json: Mapped[dict | None] = mapped_column(JSONB)
     raw_json: Mapped[dict | None] = mapped_column(JSONB)
     summary_json: Mapped[dict | None] = mapped_column(JSONB)
     api_errors_json: Mapped[list[dict] | None] = mapped_column(JSONB)

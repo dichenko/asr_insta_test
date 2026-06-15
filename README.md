@@ -28,6 +28,8 @@ Required values:
 
 - `TELEGRAM_BOT_TOKEN`
 - `INSTAGRAM_CLIENT_SECRET`
+- `FACEBOOK_APP_ID`
+- `FACEBOOK_APP_SECRET`
 - `OPENAI_API_KEY`
 - `TOKEN_ENCRYPTION_KEY`
 
@@ -47,6 +49,18 @@ Required Instagram scopes:
 
 ```text
 instagram_business_basic,instagram_business_manage_insights
+```
+
+Required Facebook scopes for competitor analysis:
+
+```text
+public_profile,pages_show_list,pages_read_engagement,instagram_basic,instagram_manage_insights
+```
+
+Facebook redirect URI:
+
+```text
+https://api.instagram-ai.liven8n.site/auth/facebook/callback
 ```
 
 ## Run locally
@@ -98,7 +112,16 @@ In Telegram:
 /start
 ```
 
-The bot should send a `Подключить Instagram` button.
+The bot should send two buttons: `Подключить Instagram — мой аккаунт` and `Подключить Facebook — конкуренты`.
+
+Supported commands:
+
+```text
+/start
+/connect_instagram
+/connect_facebook
+/status
+```
 
 ## Meta dev mode testing
 
@@ -114,6 +137,36 @@ Test flow:
 6. Confirm callback reaches `/auth/instagram/callback`.
 7. Confirm the encrypted token is saved.
 8. Wait for the final report in Telegram.
+
+## Facebook competitor testing
+
+Business Discovery requires Instagram API with Facebook Login. The Facebook user must have access to a Facebook Page linked to an Instagram Business/Creator account.
+
+1. Send `/connect_facebook` in Telegram.
+2. Complete Facebook OAuth.
+3. Confirm the bot selected a Page with linked Instagram.
+4. Send a competitor username, for example `@charlies_webs`.
+5. Confirm the competitor report is returned.
+
+Diagnostic query:
+
+```bash
+docker compose exec postgres sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -x -c "select tg_id, page_id, page_name, instagram_business_account_id, instagram_username, is_selected from facebook_pages order by created_at desc limit 10;"'
+```
+
+Competitor jobs:
+
+```bash
+docker compose exec postgres sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -x -c "select id, competitor_username, status, error_message, created_at, finished_at from competitor_analysis_jobs order by created_at desc limit 5;"'
+```
+
+Security log check:
+
+```bash
+docker compose logs app | grep -E "access_token=|/bot[0-9]+:|client_secret|fb_exchange_token"
+```
+
+Expected: no matches.
 
 ## Logs and restart
 
