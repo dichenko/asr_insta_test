@@ -33,6 +33,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         level=settings.log_level,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     await init_db_with_retry()
 
     stop_event = asyncio.Event()

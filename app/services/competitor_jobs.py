@@ -39,15 +39,38 @@ class CompetitorDataUnavailableError(RuntimeError):
 
 def _safe_error(exc: Exception) -> str:
     if isinstance(exc, httpx.HTTPStatusError):
-        return f"HTTPStatusError: status_code={exc.response.status_code}"
+        return f"HTTPStatusError: status_code={exc.response.status_code} body={_safe_response_body(exc.response)}"[:1000]
     if isinstance(exc, httpx.HTTPError):
         return exc.__class__.__name__
     message = str(exc)
+    message = _redact_text(message)
+    return f"{exc.__class__.__name__}: {message[:500]}"
+
+
+def _safe_response_body(response: httpx.Response) -> Any:
+    try:
+        body: Any = response.json()
+    except ValueError:
+        body = response.text[:1000]
+    return _redact_value(body)
+
+
+def _redact_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _redact_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_value(item) for item in value]
+    if isinstance(value, str):
+        return _redact_text(value)
+    return value
+
+
+def _redact_text(message: str) -> str:
     message = re.sub(r"access_token=[^&\s]+", "access_token=[redacted]", message)
     message = re.sub(r"Bearer\s+[A-Za-z0-9._-]+", "Bearer [redacted]", message)
     message = re.sub(r"sk-[A-Za-z0-9_-]+", "sk-[redacted]", message)
     message = re.sub(r"\b\d{6,}:[A-Za-z0-9_-]{20,}\b", "[telegram-token-redacted]", message)
-    return f"{exc.__class__.__name__}: {message[:500]}"
+    return message
 
 
 async def run_competitor_analysis_job(job_id: uuid.UUID) -> None:
@@ -91,7 +114,14 @@ async def run_competitor_analysis_job(job_id: uuid.UUID) -> None:
             if not isinstance(discovery, dict) or not discovery:
                 raise CompetitorDataUnavailableError("Instagram API returned no business_discovery data")
         except Exception as exc:
-            api_errors.append({"scope": "business_discovery", "error": _safe_error(exc)})
+            safe_message = _safe_error(exc)
+            logger.warning(
+                "Business Discovery failed: job_id=%s username=%s error=%s",
+                job_id,
+                competitor_username,
+                safe_message,
+            )
+            api_errors.append({"scope": "business_discovery", "error": safe_message})
             await _mark_failed_with_snapshot(job_id, api_errors, NO_COMPETITOR_DATA_MESSAGE, telegram)
             return
 
