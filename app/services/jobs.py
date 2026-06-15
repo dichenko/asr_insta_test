@@ -119,6 +119,14 @@ async def run_instagram_analysis_job(job_id: uuid.UUID) -> None:
 
         await telegram.send_message(job.tg_id, "Готово. Вот анализ твоего Instagram:")
         await telegram.send_long_message(job.tg_id, report_text)
+        await telegram.send_message(
+            job.tg_id,
+            (
+                "Можешь прислать ссылку на аккаунт конкурента или его @username — "
+                "я соберу открытые данные и сделаю краткий анализ.\n\n"
+                "Пример: @example или https://www.instagram.com/example/"
+            ),
+        )
 
     except Exception as exc:
         safe_message = _safe_error(exc)

@@ -139,3 +139,14 @@ class InstagramClient:
             except httpx.HTTPError as exc:
                 errors.append({"scope": "media_insights", "media_id": media_id, "metric": metric, "error": exc.__class__.__name__})
         return result, errors
+
+    async def fetch_business_discovery(self, viewer_ig_user_id: str, competitor_username: str, limit: int = 25) -> dict[str, Any]:
+        safe_limit = max(1, min(limit, 50))
+        fields = (
+            f"business_discovery.username({competitor_username})"
+            "{id,username,name,biography,website,profile_picture_url,followers_count,"
+            "follows_count,media_count,"
+            f"media.limit({safe_limit})"
+            "{id,caption,media_type,media_product_type,permalink,timestamp,like_count,comments_count}}"
+        )
+        return await self._get(viewer_ig_user_id, {"fields": fields})

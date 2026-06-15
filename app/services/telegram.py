@@ -9,8 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.db import AsyncSessionLocal
-from app.models import AuthSession, TelegramUser
+from app.models import AuthSession, CompetitorAnalysisJob, InstagramAccount, TelegramUser
 from app.services.crypto import generate_state, hash_state
+from app.utils.instagram_username import normalize_instagram_username
 from app.utils.text_split import split_telegram_text
 
 logger = logging.getLogger(__name__)
@@ -111,6 +112,20 @@ async def handle_start_or_connect(session: AsyncSession, tg_user: TelegramUser, 
     await client.send_connect_button(tg_user.tg_id, state)
 
 
+async def get_latest_instagram_account(session: AsyncSession, tg_id: int) -> InstagramAccount | None:
+    result = await session.execute(
+        select(InstagramAccount)
+        .where(
+            InstagramAccount.tg_id == tg_id,
+            InstagramAccount.access_token_encrypted.isnot(None),
+            InstagramAccount.access_token_encrypted != "",
+        )
+        .order_by(InstagramAccount.connected_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 async def handle_update(update: dict[str, Any], client: TelegramClient) -> None:
     message = update.get("message") or {}
     text = (message.get("text") or "").strip()
@@ -123,8 +138,42 @@ async def handle_update(update: dict[str, Any], client: TelegramClient) -> None:
         if text.startswith("/start") or text.startswith("/connect"):
             await handle_start_or_connect(session, tg_user, client)
         else:
+            username = normalize_instagram_username(text)
+            if username is None:
+                await session.commit()
+                await client.send_message(
+                    tg_user.tg_id,
+                    "Не понял аккаунт. Пришли @username или ссылку вида https://www.instagram.com/username/",
+                )
+                return
+
+            account = await get_latest_instagram_account(session, tg_user.tg_id)
+            if account is None:
+                await session.commit()
+                await client.send_message(
+                    tg_user.tg_id,
+                    (
+                        "Сначала подключи свой Instagram-аккаунт через /connect. "
+                        "После этого я смогу анализировать открытые данные конкурентов."
+                    ),
+                )
+                return
+
+            job = CompetitorAnalysisJob(
+                tg_id=tg_user.tg_id,
+                viewer_instagram_account_id=account.id,
+                competitor_username=username,
+            )
+            session.add(job)
             await session.commit()
-            await client.send_message(tg_user.tg_id, "Отправь /connect, чтобы подключить Instagram.")
+            await client.send_message(
+                tg_user.tg_id,
+                f"Принял: @{username}. Собираю открытые данные аккаунта и готовлю краткий анализ.",
+            )
+
+            from app.services.competitor_jobs import run_competitor_analysis_job
+
+            asyncio.create_task(run_competitor_analysis_job(job.id))
 
 
 async def polling_loop(stop_event: asyncio.Event) -> None:

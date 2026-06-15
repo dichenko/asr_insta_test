@@ -92,3 +92,64 @@ class AnalysisReport(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     instagram_account: Mapped[InstagramAccount | None] = relationship(back_populates="reports")
+
+
+class CompetitorAccount(Base):
+    __tablename__ = "competitor_accounts"
+    __table_args__ = (
+        UniqueConstraint("tg_id", "viewer_instagram_account_id", "username", name="uq_competitor_viewer_username"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tg_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("telegram_users.tg_id", ondelete="CASCADE"), nullable=False, index=True)
+    viewer_instagram_account_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("instagram_accounts.id", ondelete="CASCADE"), nullable=False, index=True)
+    username: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    instagram_user_id: Mapped[str | None] = mapped_column(Text)
+    name: Mapped[str | None] = mapped_column(Text)
+    biography: Mapped[str | None] = mapped_column(Text)
+    website: Mapped[str | None] = mapped_column(Text)
+    profile_picture_url: Mapped[str | None] = mapped_column(Text)
+    followers_count: Mapped[int | None] = mapped_column(Integer)
+    follows_count: Mapped[int | None] = mapped_column(Integer)
+    media_count: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    last_analysis_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class CompetitorAnalysisJob(Base):
+    __tablename__ = "competitor_analysis_jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tg_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("telegram_users.tg_id", ondelete="CASCADE"), nullable=False, index=True)
+    viewer_instagram_account_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("instagram_accounts.id", ondelete="CASCADE"), nullable=False, index=True)
+    competitor_username: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
+    error_message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class CompetitorSnapshot(Base):
+    __tablename__ = "competitor_snapshots"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("competitor_analysis_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+    competitor_account_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("competitor_accounts.id", ondelete="SET NULL"))
+    raw_json: Mapped[dict | None] = mapped_column(JSONB)
+    summary_json: Mapped[dict | None] = mapped_column(JSONB)
+    api_errors_json: Mapped[list[dict] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CompetitorAnalysisReport(Base):
+    __tablename__ = "competitor_analysis_reports"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("competitor_analysis_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+    tg_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("telegram_users.tg_id", ondelete="CASCADE"), nullable=False, index=True)
+    competitor_account_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("competitor_accounts.id", ondelete="SET NULL"))
+    llm_model: Mapped[str] = mapped_column(Text, nullable=False)
+    report_text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
